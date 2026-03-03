@@ -1,0 +1,49 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f4f4f4;
+  --fg: #1e1e1e;
+  --accent: #2f2f2f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: linear-gradient(#c8ecff, #f6f6f6);
+  color: var(--fg);
+}
+
+.game-shell {
+  width: min(960px, 95vw);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.title {
+  margin: 0;
+}
+
+.hud {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 700;
+}
+
+#game-canvas {
+  width: 100%;
+  height: auto;
+  border: 2px solid #222;
+  background: var(--bg);
+  image-rendering: pixelated;
+}
+
+.help {
+  margin: 0;
+  opacity: 0.85;
+}
