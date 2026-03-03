@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dino Runner</title>
+  <style>
+    :root {
+      --bg: #f4f4f4;
+      --fg: #1f1f1f;
+      --accent: #444;
+      --game-border: #bdbdbd;
+      --ground: #808080;
+      --game-over: #b00020;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      user-select: none;
+    }
+
+    .wrapper {
+      text-align: center;
+      width: min(95vw, 900px);
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(1.2rem, 2.6vw, 1.9rem);
+      letter-spacing: 0.03em;
+    }
+
+    canvas {
+      width: 100%;
+      max-width: 900px;
+      height: auto;
+      border: 2px solid var(--game-border);
+      background: #fff;
+      display: block;
+      margin: 0 auto;
+      image-rendering: crisp-edges;
+    }
+
+    .hint {
+      margin: 10px 0 0;
+      color: var(--accent);
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+  <main class="wrapper">
+    <h1>Dino Runner</h1>
+    <canvas id="game" width="900" height="280" aria-label="Dino runner game"></canvas>
+    <p class="hint">Press <strong>SPACE</strong> to jump. Press any key to restart after game over.</p>
+  </main>
+
+  <script>
+    "use strict";
+
+    // ------------------------------
+    // Core constants and utilities
+    // ------------------------------
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    const WIDTH = canvas.width;
+    const HEIGHT = canvas.height;
+    const GROUND_Y = HEIGHT - 40;
+    const GRAVITY = 2200;
+    const JUMP_VELOCITY = -760;
+
+    const randRange = (min, max) => Math.random() * (max - min) + min;
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+    // ------------------------------
+    // Audio (simple generated beeps)
+    // ------------------------------
+    let audioCtx = null;
+
+    function playTone(freq, duration = 0.06, type = "square", volume = 0.03) {
+      if (!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      gain.gain.value = volume;
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      const now = audioCtx.currentTime;
+      osc.start(now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.stop(now + duration);
+    }
+
+    // ------------------------------
+    // Game state
+    // ------------------------------
+    const state = {
+      running: true,
+      gameOver: false,
+      score: 0,
+      highScore: Number(localStorage.getItem("dinoHighScore") || 0),
+      speed: 360,
+      speedGrowth: 12,
+      obstacleTimer: 0,
+      nextObstacleIn: randRange(0.8, 1.7),
+      flashTimer: 0,
+      lastTime: 0,
+      player: {
+        x: 90,
+        y: GROUND_Y - 52,
+        width: 48,
+        height: 52,
+        vy: 0,
+        onGround: true,
+        legPhase: 0
+      },
+      obstacles: []
+    };
+
+    // ------------------------------
+    // Input handling
+    // ------------------------------
+    function jump() {
+      const p = state.player;
+      if (p.onGround && !state.gameOver) {
+        p.vy = JUMP_VELOCITY;
+        p.onGround = false;
+        playTone(660, 0.05, "square", 0.025);
+      }
+    }
+
+    function resetGame() {
+      state.running = true;
+      state.gameOver = false;
+      state.score = 0;
+      state.speed = 360;
+      state.obstacleTimer = 0;
+      state.nextObstacleIn = randRange(0.7, 1.5);
+      state.flashTimer = 0;
+      state.obstacles.length = 0;
+
+      const p = state.player;
+      p.x = 90;
+      p.y = GROUND_Y - p.height;
+      p.vy = 0;
+      p.onGround = true;
+      p.legPhase = 0;
+    }
+
+    window.addEventListener("keydown", (event) => {
+      if (event.code !== "Space") {
+        if (state.gameOver) {
+          if (!audioCtx) audioCtx = new AudioContext();
+          resetGame();
+        }
+        return;
+      }
+
+      event.preventDefault();
+      if (!audioCtx) audioCtx = new AudioContext();
+
+      if (state.gameOver) {
+        resetGame();
+      } else {
+        jump();
+      }
+    });
+
+    // ------------------------------
+    // Spawning and collision
+    // ------------------------------
+    function spawnObstacle() {
+      const tall = Math.random() < 0.35;
+      const width = tall ? randRange(30, 42) : randRange(24, 36);
+      const height = tall ? randRange(58, 84) : randRange(40, 62);
+
+      state.obstacles.push({
+        x: WIDTH + width,
+        y: GROUND_Y - height,
+        width,
+        height
+      });
+    }
+
+    function rectIntersect(a, b) {
+      return (
+        a.x < b.x + b.width &&
+        a.x + a.width > b.x &&
+        a.y < b.y + b.height &&
+        a.y + a.height > b.y
+      );
+    }
+
+    function triggerGameOver() {
+      state.gameOver = true;
+      state.running = false;
+      state.flashTimer = 0.28;
+      state.highScore = Math.max(state.highScore, Math.floor(state.score));
+      localStorage.setItem("dinoHighScore", String(state.highScore));
+      playTone(180, 0.12, "sawtooth", 0.04);
+      setTimeout(() => playTone(130, 0.16, "triangle", 0.03), 70);
+    }
+
+    // ------------------------------
+    // Update and render
+    // ------------------------------
+    function update(dt) {
+      if (state.gameOver) {
+        state.flashTimer = Math.max(0, state.flashTimer - dt);
+        return;
+      }
+
+      const p = state.player;
+
+      // Player vertical movement and gravity
+      p.vy += GRAVITY * dt;
+      p.y += p.vy * dt;
+
+      if (p.y >= GROUND_Y - p.height) {
+        p.y = GROUND_Y - p.height;
+        p.vy = 0;
+        p.onGround = true;
+      }
+
+      // Running leg animation phase
+      if (p.onGround) {
+        p.legPhase += dt * (state.speed * 0.045);
+      }
+
+      // Difficulty and scoring
+      state.speed += state.speedGrowth * dt;
+      state.score += dt * 12;
+
+      // Spawn timing
+      state.obstacleTimer += dt;
+      if (state.obstacleTimer >= state.nextObstacleIn) {
+        spawnObstacle();
+        state.obstacleTimer = 0;
+
+        // Keep spacing fair as speed increases
+        const minGap = clamp(0.64 - (state.speed - 360) / 1800, 0.38, 0.64);
+        const maxGap = clamp(1.45 - (state.speed - 360) / 2200, 0.7, 1.45);
+        state.nextObstacleIn = randRange(minGap, maxGap);
+      }
+
+      // Move obstacles and remove offscreen
+      for (let i = state.obstacles.length - 1; i >= 0; i--) {
+        const obstacle = state.obstacles[i];
+        obstacle.x -= state.speed * dt;
+        if (obstacle.x + obstacle.width < -10) {
+          state.obstacles.splice(i, 1);
+        }
+      }
+
+      // Collision check with tight player hurtbox
+      const hurtbox = {
+        x: p.x + 6,
+        y: p.y + 4,
+        width: p.width - 12,
+        height: p.height - 8
+      };
+
+      for (const obstacle of state.obstacles) {
+        if (rectIntersect(hurtbox, obstacle)) {
+          triggerGameOver();
+          break;
+        }
+      }
+    }
+
+    function drawGround() {
+      ctx.strokeStyle = "#888";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, GROUND_Y + 1);
+      ctx.lineTo(WIDTH, GROUND_Y + 1);
+      ctx.stroke();
+
+      // Decorative little floor chunks
+      ctx.fillStyle = "#9a9a9a";
+      for (let x = -30; x < WIDTH + 60; x += 80) {
+        const scroll = (performance.now() * 0.08) % 80;
+        ctx.fillRect(x - scroll, GROUND_Y + 7, 28, 3);
+      }
+    }
+
+    function drawPlayer() {
+      const p = state.player;
+      const blink = !state.gameOver || Math.floor(performance.now() / 120) % 2 === 0;
+
+      ctx.fillStyle = state.flashTimer > 0 ? "#222" : "#2f2f2f";
+      ctx.fillRect(p.x, p.y, p.width, p.height);
+
+      // Head
+      ctx.fillRect(p.x + 28, p.y - 12, 20, 16);
+
+      // Eye
+      if (blink) {
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(p.x + 40, p.y - 6, 4, 4);
+      }
+
+      // Legs animation while running
+      const legSwing = p.onGround ? Math.sin(p.legPhase) * 5 : 0;
+      ctx.fillStyle = "#2f2f2f";
+      ctx.fillRect(p.x + 9, p.y + p.height - 2, 8, 12 + legSwing);
+      ctx.fillRect(p.x + 24, p.y + p.height - 2, 8, 12 - legSwing);
+
+      // Tail
+      ctx.fillRect(p.x - 10, p.y + 14, 12, 8);
+    }
+
+    function drawObstacles() {
+      ctx.fillStyle = "#286d36";
+      for (const o of state.obstacles) {
+        ctx.fillRect(o.x, o.y, o.width, o.height);
+        // Cactus arms/details
+        if (o.height > 55) {
+          ctx.fillRect(o.x - 8, o.y + 16, 8, 6);
+          ctx.fillRect(o.x + o.width, o.y + 26, 8, 6);
+        }
+      }
+    }
+
+    function drawUI() {
+      ctx.fillStyle = "#2f2f2f";
+      ctx.font = "bold 22px monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(`Score: ${Math.floor(state.score)}`, 18, 30);
+      ctx.fillText(`High: ${state.highScore}`, 18, 56);
+
+      if (state.gameOver) {
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#b00020";
+        ctx.font = "bold 48px sans-serif";
+        ctx.fillText("GAME OVER", WIDTH / 2, HEIGHT / 2 - 6);
+
+        ctx.fillStyle = "#333";
+        ctx.font = "22px sans-serif";
+        ctx.fillText("Press SPACE or any key to restart", WIDTH / 2, HEIGHT / 2 + 34);
+      }
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, WIDTH, HEIGHT);
+      drawGround();
+      drawObstacles();
+      drawPlayer();
+      drawUI();
+    }
+
+    // ------------------------------
+    // Main game loop
+    // ------------------------------
+    function loop(timestamp) {
+      if (!state.lastTime) state.lastTime = timestamp;
+      const dt = Math.min((timestamp - state.lastTime) / 1000, 0.033);
+      state.lastTime = timestamp;
+
+      update(dt);
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
